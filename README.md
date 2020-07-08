@@ -22,6 +22,7 @@ Slide Puzzle Game with Pathfinder Algorithm Solver
     
 ### Gameplay
     Upon starting the game the board will be shuffled
+    Pressing esc or Clicking the 'X' in the top right corner will terminate the game
     Clicking a tile adjacent to the 'Blank' Tile will swap its position with the blank tile
     The Arrow Keys and W-A-S-D can also be used to move the tiles on the board
     The game is 'Won' when the board reaches the following state:
