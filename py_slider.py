@@ -41,9 +41,6 @@ FPS = 60                    # Graphical Refresh Rate
 X_MARGIN = int((WINDOW_WIDTH - (TILE_SIZE * BOARD_WIDTH + (BOARD_WIDTH - 1))) / 2)
 Y_MARGIN = int((WINDOW_HEIGHT - (TILE_SIZE * BOARD_HEIGHT + (BOARD_HEIGHT - 1))) / 2)
 
-# Solution Constants
-QUICK_SOLVE = False
-
 # Global Variables
 FPS_CLOCK = None            # Used for timing display refresh
 DISPLAY_SURFACE = None      # Surface that contains all game graphics
@@ -346,9 +343,6 @@ def solve_puzzle_a_star(board, solution_board):
                 minimum = frontier[i].estimated_cost
                 min_h = frontier[i].heuristic_value
                 optimal_node = frontier[i]
-            if QUICK_SOLVE and frontier[i].heuristic_value is 0:
-                optimal_node = frontier[i]
-                break
 
         return optimal_node, optimal_node.heuristic_value == 0
 
