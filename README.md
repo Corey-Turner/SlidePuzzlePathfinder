@@ -18,7 +18,7 @@ Slide Puzzle Game with Pathfinder Algorithm Solver
     Newer/Older versions of Python and Pygame may be compatible but are not guarenteed to work
 
 ### Run
-    run py_slider.py
+    py_slider.py can be ran as a script to start the application
     
 ### Gameplay
     Upon starting the game the board will be shuffled
