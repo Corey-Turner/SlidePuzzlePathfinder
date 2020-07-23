@@ -56,19 +56,12 @@ Slide Puzzle Game with Pathfinder Algorithm Solver
     Solution tests are tested based on their ability to solve a randome puzzle There are no tests currently that handle the specific functions within each test method
     
     pytest is used as the test harness:
-    *pytest solver_logic_unit_tests.py* can be used to test solver logic
+    'pytest solver_logic_unit_tests.py' can be used to test solver logic
         These tests check the solvers ability to solve a random puzzle
         These tests also stress test the solver by testing multiple tests side by side
     
-    *pytest board_logic_unit_tests.py* can be used to test the board logic
+    'pytest board_logic_unit_tests.py' can be used to test the board logic
         These tests check the functionality of all non graphical board logic functions
         
-    -r A can be used to show the output of all tests (Pass/Fail/Skipped)
-    -s can be used to show test results in real time
-    
-    
-    
-    
-
-
-
+    the '-r' flag with parameter 'A' can be used to show the output of all tests (Pass/Fail/Skipped)
+    The '-s' flag can be used to show test results in real time
