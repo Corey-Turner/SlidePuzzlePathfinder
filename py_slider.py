@@ -1,6 +1,13 @@
-import pygame, sys, random, enum, time
+import pygame, sys, random, enum, time,threading
 from pygame.locals import *
 
+# Solution Constants
+SOLUTION_METHOD = 1         # Determines the solution that will be used to solve the puzzle
+                            # 0 = Shortest Path First
+                            # 1 = A Star Method
+
+# Test Constant
+TEST_MODE = False      # Used in Unit tests to prevent test from failing due to graphics not being loaded
 
 # Board Size Constants
 BOARD_WIDTH = 3      # Determines the number of horizontal tiles
@@ -51,7 +58,10 @@ NEW_GAME_SURFACE = None     # Surface that contains the 'New Game' Button
 NEW_GAME_RECT = None        # Rectangle that constrains the 'New Game' Button
 SOLVE_GAME_SURFACE = None   # Surface that contains the 'Solve' Button
 SOLVE_GAME_RECT = None      # Rectangle that constrains the 'Solve' Button
-
+SOLUTION_NODE = None
+SOLVER_COMPLETE = None
+BOARDS_ANALYZED = 0
+TERMINATED = False
 
 # Enumeration to map player move directions
 # UP represents a Tile moving UP into the empty square
@@ -67,16 +77,22 @@ class PlayerMoves(enum.Enum):
 # Checks if the player closes the window or presses esc
 # terminates game on user quit
 def check_for_quit():
-
+    global TERMINATED
     # Exits the game and closes the game console
     def terminate_game():
         pygame.quit()
         sys.exit()
 
+    if TEST_MODE:
+        return
     for event in pygame.event.get(QUIT):
+        TERMINATED = True
+        time.sleep(2)
         terminate_game()
     for event in pygame.event.get(KEYUP):
         if event.key == K_ESCAPE:
+            TERMINATED = True
+            time.sleep(2)
             terminate_game()
         pygame.event.post(event)
 
@@ -122,7 +138,8 @@ def get_top_left_of_tile(tile_x, tile_y):
 # Message will appear in the top left corner of the game
 def draw_board(board, message):
     global DISPLAY_SURFACE
-
+    if TEST_MODE:
+        return
     DISPLAY_SURFACE.fill(BACK_COLOR)
     # Adds Message to DISPLAY_SURFACE if the message is not empty
     if message:
@@ -149,8 +166,8 @@ def draw_board(board, message):
 # Finds the Row and Column of the empty tile
 # Returns (int) Col, (int) Row
 def find_empty_square(board):
-    for x in range(BOARD_WIDTH):
-        for y in range(BOARD_HEIGHT):
+    for x in range(len(board)):
+        for y in range(len(board[0])):
             if board[x][y] is None:
                 return x, y
     return None
@@ -160,7 +177,7 @@ def find_empty_square(board):
 # Returns (Bool) - Valid Move = True
 def is_valid_move(board, move):
     x, y = find_empty_square(board)
-    return ((PlayerMoves.UP == move and y != BOARD_HEIGHT - 1) or
+    return ((PlayerMoves.UP == move and y != len(board[0]) - 1) or
             (PlayerMoves.DOWN == move and y != 0) or
             (PlayerMoves.LEFT == move and len(board) - 1 != x) or
             (PlayerMoves.RIGHT == move and 0 != x))
@@ -183,7 +200,6 @@ def apply_move_to_board(board, move):
 # Handles the tile translation animation
 def animate_move(board, move, message, animation_speed):
     global DISPLAY_SURFACE, FPS_CLOCK
-
     empty_x, empty_y = find_empty_square(board)
     # Determine move that is being moved to the empty square
     if move == PlayerMoves.UP:
@@ -202,6 +218,8 @@ def animate_move(board, move, message, animation_speed):
         move_x = empty_x
         move_y = empty_y
 
+    if TEST_MODE:
+        return
     # Prepares the base surface
     draw_board(board, message)
     board_surface = DISPLAY_SURFACE.copy()
@@ -228,7 +246,7 @@ def animate_move(board, move, message, animation_speed):
 
 # Checks if a move is valid and applies the move if it is
 def check_make_move(board, move, message, animation_speed):
-    if move is not PlayerMoves.UNCHANGED:
+    if move is not PlayerMoves.UNCHANGED and is_valid_move(board, move):
         # Move Animation
         if animation_speed is not None:
             animate_move(board, move, message, animation_speed)
@@ -240,7 +258,7 @@ def check_make_move(board, move, message, animation_speed):
 # Retrieves the Column and Row of the tile that was clicked by the user at coordinates pos_x, pos_y
 # Returns (int) Col, (int) Row
 # Returns None, None if the click location is somewhere other than a tile
-def get_click_location(board, pos_x, pos_y):
+def get_tile_clicked(board, pos_x, pos_y):
     for tile_x in range(len(board)):
         for tile_y in range(len(board[0])):
             top, left = get_top_left_of_tile(tile_x, tile_y)
@@ -281,6 +299,7 @@ def deep_copy_board(in_board):
 def shuffle_board_from_solution(solution):
     a_board = deep_copy_board(solution) # active board
     prev_move = PlayerMoves.UNCHANGED
+    animation_speed = None if TEST_MODE else int(TILE_SIZE / 2)
     for i in range(BOARD_WIDTH * BOARD_HEIGHT * 10):
         rand_num = random.randint(1, 4)
         move = PlayerMoves.UNCHANGED
@@ -294,7 +313,7 @@ def shuffle_board_from_solution(solution):
             move = PlayerMoves.RIGHT
         if is_valid_move(a_board, move):
             prev_move = move
-            check_make_move(a_board, move, '', int(TILE_SIZE / 2))
+            check_make_move(a_board, move, '', animation_speed)
         else:
             i = i + 1
 
@@ -305,6 +324,10 @@ def shuffle_board_from_solution(solution):
 # Creates a solution for the board and applies it, With animation
 # Returns (int[][]) board
 def solve_puzzle_a_star(board, solution_board):
+    global SOLUTION_NODE, SOLVER_COMPLETE
+    SOLUTION_NODE = None
+    SOLVER_COMPLETE = False
+
     class FrontierNode:
 
         # Calculates an estimated distance to the goal
@@ -377,37 +400,39 @@ def solve_puzzle_a_star(board, solution_board):
             new_nodes.append(node_to_append)
         return new_nodes
 
-
     # creates a list of moves to be taken in order to solve the puzzle
     # Returns (PlayerMove[]) solution
     def calculate_solution(active_board, sol_board):
-        previous_update = time.time_ns()
-        frame_counter, counter = 0, 0
+        global SOLUTION_NODE, SOLVER_COMPLETE, BOARDS_ANALYZED, TERMINATED
         frontier = []
         visited_boards = [] # A* may already be optimized to not return to boards that have already been visited
         frontier.append(FrontierNode(active_board, sol_board, []))
         # loop through the solution until solution is found or until MAX_SOLUTION is reached
-        while len(frontier) > 0:
-            counter = counter + 1
+        BOARDS_ANALYZED = 0
+        while len(frontier) > 0 and not TERMINATED:
+            BOARDS_ANALYZED = BOARDS_ANALYZED + 1
             current_optimal_node, solved = check_for_optimal_solution(frontier)
             if solved:
-                return current_optimal_node
+                SOLUTION_NODE = current_optimal_node
+                SOLVER_COMPLETE = True
+                return
             frontier.extend(expand_frontier(current_optimal_node, visited_boards))
             visited_boards.append(current_optimal_node.board)
             frontier.remove(current_optimal_node)
+        SOLUTION_NODE = None
+        SOLVER_COMPLETE = True
+        return
 
-            # Continue to update the graphics as we calculate the solution
-            graphics_update_needed = (time.time_ns() - previous_update) >= 6000000000/FPS
-            check_for_quit()
-
-            if graphics_update_needed:
-                frame_counter = frame_counter + 1
-                if frame_counter > FPS:
-                    frame_counter = 0
-                    previous_update = time.time_ns()
-                    draw_board(board, 'Generating Solution...    Boards Analyzed: ' + str(counter))
-                    pygame.display.update()
-        return None
+    def graphics_handler():
+        global SOLVER_COMPLETE
+        if TEST_MODE:
+            return
+        while not SOLVER_COMPLETE:
+            # Handle Display Update
+            draw_board(board, 'Generating Solution...    Boards Analyzed: ' + str(BOARDS_ANALYZED))
+            pygame.display.update()
+            FPS_CLOCK.tick(FPS)
+        SOLVER_COMPLETE = False
 
     # Applies the solution to the board, with animation
     # Returns the board after the solution has been applied
@@ -416,11 +441,135 @@ def solve_puzzle_a_star(board, solution_board):
             check_make_move(board, solution[i], 'Solving...', int(TILE_SIZE/3))
         return board
 
-    solution_node = calculate_solution(board, solution_board)
-    if solution_node is not None:
-        board = apply_solution(board, solution_node.solution)
+    solver_thread = threading.Thread(target=calculate_solution, args=(board, solution_board))
+    graphics_thread = threading.Thread(target=graphics_handler, args=())
+    solver_thread.start()
+    graphics_thread.start()
+    solver_thread.join()
+    solver_thread.join()
+
+    if SOLUTION_NODE is not None:
+        board = apply_solution(board, SOLUTION_NODE.solution)
     return board
-    # Animate Solution
+
+
+# Creates a solution for the board and applies it, With animation
+# Returns (int[][]) board
+def solve_puzzle_shortest_path_first(board, solution_board):
+    global SOLUTION_NODE, solver_complete
+    SOLUTION_NODE = None
+    SOLVER_COMPLETE = False
+
+    class FrontierNode:
+        def is_board_solved(self):
+            for i in range(len(self.board)):
+                for j in range(len(self.board[0])):
+                    if self.board[i][j] is not self.solve_state[i][j]:
+                        return False
+            return True
+
+        # Constructor for Node Object
+        def __init__(self, current_board, int_solution_board, parent_solution):
+            self.board = current_board
+            self.solve_state = int_solution_board
+            self.solution = parent_solution
+            self.active_cost = len(self.solution)
+            self.board_is_solved = self.is_board_solved()
+
+    # Finds the node with the lowest estimated cost
+    # If the node with the lowest estimated cost has a heuristic value of 0 the puzzle is solved
+    # Returns (FrontierNode) optimal_node, is_solved
+    def check_for_optimal_solution(frontier):
+        optimal_node = frontier[0]
+        minimum = frontier[0].active_cost
+        for i in range(len(frontier)):
+            if frontier[i].active_cost < minimum:
+                minimum = frontier[i].active_cost
+                optimal_node = frontier[i]
+        return optimal_node
+
+    def create_new_node_extension(node, visited, move):
+        if is_valid_move(node.board, move):
+            new_solution = []
+            new_solution.extend(node.solution)
+            new_solution.append(move)
+            new_board = deep_copy_board(node.board)
+            apply_move_to_board(new_board, move)
+            new_node = FrontierNode(new_board, node.solve_state, new_solution)
+            if new_node.board not in visited:
+                return new_node
+        return None
+
+    # Creates a list of all nodes that can be expanded off of the current node
+    # boards that have already been visited will not be returned to
+    # Returns (FrontierNode[]) new_nodes
+    def expand_frontier(node, visited):
+        new_nodes = []
+        node_to_append = create_new_node_extension(node, visited, PlayerMoves.UP)
+        if node_to_append is not None:
+            new_nodes.append(node_to_append)
+        node_to_append = create_new_node_extension(node, visited, PlayerMoves.DOWN)
+        if node_to_append is not None:
+            new_nodes.append(node_to_append)
+        node_to_append = create_new_node_extension(node, visited, PlayerMoves.LEFT)
+        if node_to_append is not None:
+            new_nodes.append(node_to_append)
+        node_to_append = create_new_node_extension(node, visited, PlayerMoves.RIGHT)
+        if node_to_append is not None:
+            new_nodes.append(node_to_append)
+        return new_nodes
+
+    # creates a list of moves to be taken in order to solve the puzzle
+    # Returns (PlayerMove[]) solution
+    def calculate_solution(active_board, sol_board):
+        global SOLUTION_NODE, SOLVER_COMPLETE, BOARDS_ANALYZED, TERMINATED
+        frontier = []
+        visited_boards = [] # A* may already be optimized to not return to boards that have already been visited
+        frontier.append(FrontierNode(active_board, sol_board, []))
+        # loop through the solution until solution is found or until MAX_SOLUTION is reached
+        BOARDS_ANALYZED = 0
+        while len(frontier) > 0 and not TERMINATED:
+            BOARDS_ANALYZED = BOARDS_ANALYZED + 1
+            current_optimal_node = check_for_optimal_solution(frontier)
+            if current_optimal_node.board_is_solved:
+                SOLUTION_NODE = current_optimal_node
+                SOLVER_COMPLETE = True
+                return
+            frontier.extend(expand_frontier(current_optimal_node, visited_boards))
+            visited_boards.append(current_optimal_node.board)
+            frontier.remove(current_optimal_node)
+        SOLUTION_NODE = None
+        SOLVER_COMPLETE = True
+        return
+
+    def graphics_handler():
+        global SOLVER_COMPLETE
+        if TEST_MODE:
+            return
+        while not SOLVER_COMPLETE:
+            # Handle Display Update
+            draw_board(board, 'Generating Solution...    Boards Analyzed: ' + str(BOARDS_ANALYZED))
+            pygame.display.update()
+            FPS_CLOCK.tick(FPS)
+        SOLVER_COMPLETE = False
+
+    # Applies the solution to the board, with animation
+    # Returns the board after the solution has been applied
+    def apply_solution(board, solution):
+        for i in range(len(solution)):
+            check_make_move(board, solution[i], 'Solving...', int(TILE_SIZE/3))
+        return board
+
+    solver_thread = threading.Thread(target=calculate_solution, args=(board, solution_board))
+    graphics_thread = threading.Thread(target=graphics_handler, args=())
+    solver_thread.start()
+    graphics_thread.start()
+    solver_thread.join()
+    solver_thread.join()
+
+    if SOLUTION_NODE is not None:
+        board = apply_solution(board, SOLUTION_NODE.solution)
+    return board
 
 
 # Handles W-A-S-D and Arrow key press events for player moves
@@ -450,7 +599,10 @@ def handle_options_clicked_event(board, starting_board, solution_board, event_po
     elif NEW_GAME_RECT.collidepoint(event_position):
         board, starting_board = shuffle_board_from_solution(deep_copy_board(solution_board))
     elif SOLVE_GAME_RECT.collidepoint(event_position):
-        board = solve_puzzle_a_star(board, solution_board)
+        if SOLUTION_METHOD is 0:
+            board = solve_puzzle_shortest_path_first(board, solution_board)
+        elif SOLUTION_METHOD is 1:
+            board = solve_puzzle_a_star(board, solution_board)
     return board, starting_board
 
 
@@ -497,7 +649,7 @@ def game_loop(board, starting_board, solution_board):
             if event.type == KEYUP:
                 selected_move = handle_key_press_event(board, event)
             elif event.type == MOUSEBUTTONUP:
-                click_x, click_y = get_click_location(board, event.pos[0], event.pos[1])
+                click_x, click_y = get_tile_clicked(board, event.pos[0], event.pos[1])
                 if (click_x, click_y) == (None, None):
                     board, starting_board = handle_options_clicked_event(board, starting_board, solution_board, event.pos)
                 else:
